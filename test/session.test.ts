@@ -64,6 +64,31 @@ describe("session adapters", () => {
     expect(draft.completed.some((item) => /unique constraint/i.test(item))).toBe(true);
   });
 
+  it("prefers the latest high-signal goal and dedupes near-duplicate failed attempts", () => {
+    const draft = draftFromSession({
+      agent: "codex",
+      path: "fixture",
+      messages: [
+        { role: "user", text: "Please look around the repository first." },
+        { role: "assistant", text: "I explored the tree." },
+        {
+          role: "user",
+          text: "Finish the webhook retry queue in src/webhook.ts so duplicate deliveries are safe."
+        },
+        {
+          role: "assistant",
+          text: "The naive mutex approach failed under load. The naive mutex approach failed again with the same races. Next step is add an outbox."
+        }
+      ],
+      commands: [],
+      files: ["src/webhook.ts"]
+    });
+    expect(draft.goal).toMatch(/webhook retry queue/i);
+    expect(draft.attempts).toHaveLength(1);
+    expect(draft.attempts[0]?.approach).toMatch(/naive mutex/i);
+    expect(draft.nextAction).toMatch(/outbox/i);
+  });
+
   it("passes a strict JSON schema to an optional summarizer", () => {
     expect(sessionSummaryJsonSchema.additionalProperties).toBe(false);
     const bin = mkdtempSync(join(tmpdir(), "handoff-fake-agent-"));
@@ -133,6 +158,34 @@ exit 1
     try {
       expect(resolveOpenCodeResumeSessionId(root, "__last__", "handoff-login")).toBe("ses_new");
       expect(resolveOpenCodeResumeSessionId(root, "__last__")).toBe("ses_new");
+      expect(resolveOpenCodeResumeSessionId(root, "ses_explicit")).toBe("ses_explicit");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
+  it("resolves OpenCode resume ids with title and launch-time window", () => {
+    const root = mkdtempSync(join(tmpdir(), "handoff-opencode-repo-"));
+    const bin = mkdtempSync(join(tmpdir(), "handoff-opencode-bin-"));
+    const executable = join(bin, "opencode");
+    const launchedAt = "2026-08-06T12:00:00.000Z";
+    const launchedMs = Date.parse(launchedAt);
+    writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "session" ] && [ "$2" = "list" ]; then
+  printf '%s' "[{\\"id\\":\\"ses_old\\",\\"directory\\":\\"${root}\\",\\"title\\":\\"old\\",\\"updated\\":1},{\\"id\\":\\"ses_stale\\",\\"directory\\":\\"${root}\\",\\"title\\":\\"other\\",\\"updated\\":${Math.floor((launchedMs - 86_400_000) / 1000)}},{\\"id\\":\\"ses_new\\",\\"directory\\":\\"${root}\\",\\"title\\":\\"handoff-login\\",\\"updated\\":${Math.floor(launchedMs / 1000)}}]"
+  exit 0
+fi
+exit 1
+`, "utf8");
+    chmodSync(executable, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    try {
+      expect(resolveOpenCodeResumeSessionId(root, "__last__", {
+        sessionName: "handoff-login",
+        launchedAt
+      })).toBe("ses_new");
+      expect(resolveOpenCodeResumeSessionId(root, "__last__", { launchedAt })).toBe("ses_new");
       expect(resolveOpenCodeResumeSessionId(root, "ses_explicit")).toBe("ses_explicit");
     } finally {
       process.env.PATH = originalPath;

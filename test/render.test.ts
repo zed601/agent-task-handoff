@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { launchSpec, renderHandoffPrompt, renderHumanHandoff, resumeLaunchSpec } from "../src/render.js";
+import { enterMode, launchSpec, renderHandoffPrompt, renderHumanHandoff, resumeLaunchSpec, supportsNativeEnter } from "../src/render.js";
 import { checkpointFixture } from "./helpers.js";
 
 describe("target renderers", () => {
@@ -30,6 +30,25 @@ describe("target renderers", () => {
     expect(prompt).toContain("src/ (12 files)");
     expect(prompt).not.toContain(".pnpm-store/v11/files/999");
     expect(prompt.length).toBeLessThan(5000);
+  });
+
+  it("trims oversized progress lists in recovery prompts", () => {
+    const checkpoint = checkpointFixture("/repo");
+    checkpoint.progress.completed = Array.from({ length: 20 }, (_, index) => ({
+      text: `Completed step ${index} with enough detail to be meaningful`,
+      provenance: "observed" as const,
+      evidence: []
+    }));
+    checkpoint.contextRefs = Array.from({ length: 30 }, (_, index) => ({
+      path: `src/file-${index}.ts`,
+      symbols: [],
+      reason: `context ${index}`
+    }));
+    const prompt = renderHandoffPrompt(checkpoint, "claude");
+    expect(prompt).toContain("Completed step 0");
+    expect(prompt).toContain("… 12 more omitted");
+    expect(prompt).toContain("… 10 more omitted");
+    expect(prompt).not.toContain("Completed step 19");
   });
 
   it("builds argument arrays without a shell", () => {
@@ -65,7 +84,7 @@ describe("target renderers", () => {
     });
   });
 
-  it("resumes Claude by UUID, Codex by name or last, and OpenCode by continue or session", () => {
+  it("resumes Claude/Codex/OpenCode natively and Copilot/Cursor weakly", () => {
     expect(resumeLaunchSpec("claude", "/repo", "d018c05a-0552-4c0d-9aef-2471cb6d225d")).toEqual({
       command: "claude",
       args: ["--resume", "d018c05a-0552-4c0d-9aef-2471cb6d225d"],
@@ -91,7 +110,20 @@ describe("target renderers", () => {
       args: ["/repo", "--session", "ses_abc"],
       cwd: "/repo"
     });
-    expect(() => resumeLaunchSpec("cursor", "/repo", "x")).toThrow(/not implemented/);
+    expect(resumeLaunchSpec("cursor", "/repo", "__last__")).toEqual({
+      command: "agent",
+      args: ["resume"],
+      cwd: "/repo"
+    });
+    expect(resumeLaunchSpec("copilot", "/repo", "__last__", { prompt: "saved prompt" })).toEqual({
+      command: "copilot",
+      args: ["-C", "/repo", "-i", "saved prompt"],
+      cwd: "/repo"
+    });
+    expect(() => resumeLaunchSpec("copilot", "/repo", "__last__")).toThrow(/saved handoff prompt/);
+    expect(supportsNativeEnter("cursor")).toBe(true);
+    expect(enterMode("cursor")).toBe("weak");
+    expect(enterMode("claude")).toBe("native");
   });
 
   it("renders a human-readable Markdown handoff", () => {

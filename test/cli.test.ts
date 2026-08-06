@@ -398,9 +398,66 @@ fs.writeFileSync(process.env.HANDOFF_TEST_ARGS, JSON.stringify(args));
       sessionId: "ses_from_list",
       sessionName: "handoff-login"
     });
-    expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual([
-      root,
-      "--session", "ses_from_list"
-    ]);
+    const enterArgs = JSON.parse(readFileSync(argsPath, "utf8")) as string[];
+    expect(enterArgs.slice(-2)).toEqual(["--session", "ses_from_list"]);
+    expect(enterArgs[0]).toMatch(/handoff-cli-/);
+  });
+
+  it("records launch receipts and weakly re-enters Cursor", () => {
+    const root = mkdtempSync(join(tmpdir(), "handoff-cli-"));
+    const bin = mkdtempSync(join(tmpdir(), "handoff-bin-"));
+    const argsPath = join(root, "agent-args.json");
+    const fakeAgent = join(bin, "agent");
+    initializeGitRepository(root);
+    handoff(root, "init");
+    handoff(root, "checkpoint", "--yes", "--task", "login", "--goal", "Fix login", "--next", "Run tests");
+    writeFileSync(
+      fakeAgent,
+      `#!/usr/bin/env node\nrequire("node:fs").writeFileSync(process.env.HANDOFF_TEST_ARGS, JSON.stringify(process.argv.slice(2)));\n`,
+      "utf8"
+    );
+    chmodSync(fakeAgent, 0o755);
+    const env = {
+      ...process.env,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      HANDOFF_TEST_ARGS: argsPath,
+      NO_COLOR: "1"
+    };
+
+    const transfer = JSON.parse(execFileSync(process.execPath, [
+      cli,
+      "go", "login",
+      "--to", "cursor",
+      "--name", "handoff-login",
+      "--exec",
+      "--launch-mode", "inline",
+      "--no-copy",
+      "--json"
+    ], { cwd: root, encoding: "utf8", env })) as {
+      launched: boolean;
+      resumeCommand: string;
+      targetSessionId: string;
+      launchReceiptPath: string;
+    };
+
+    expect(transfer).toMatchObject({
+      launched: true,
+      targetSessionId: "__last__",
+      resumeCommand: "agent resume"
+    });
+    expect(existsSync(transfer.launchReceiptPath)).toBe(true);
+
+    const entered = JSON.parse(execFileSync(process.execPath, [
+      cli,
+      "enter", "login",
+      "--to", "cursor",
+      "--launch-mode", "inline",
+      "--json"
+    ], { cwd: root, encoding: "utf8", env })) as { enterMode: string; sessionId: string };
+    expect(entered).toMatchObject({
+      enterMode: "weak",
+      sessionId: "__last__"
+    });
+    expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual(["resume"]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertNoSecrets, scanSecrets } from "../src/security.js";
+import { assertNoSecrets, configureSecretAllowlist, scanSecrets } from "../src/security.js";
 
 /** Build sample credentials at runtime so the repo never stores scanner-triggering literals. */
 function sample(parts: string[]): string {
@@ -35,5 +35,18 @@ describe("secret scanning", () => {
   it("does not treat an embedded temporary path as a secret", () => {
     expect(scanSecrets("Root: /private/var/folders/abc123/T/handoff-cli-DVqOej/project")).toEqual([]);
     expect(scanSecrets("cwd=/home/ubuntu/.cache/tmp-abcdef0123456789abcdef0123456789")).toEqual([]);
+  });
+
+  it("allowlists high-entropy substrings but never known credential patterns", () => {
+    const highEntropy = sample(["Zm9vYmFyYmF6cXV4am9rZWx", "tbm9wcXJzdHV2d3h5ejEyMzQ1Ng"]);
+    expect(scanSecrets(highEntropy).some((item) => item.kind === "high-entropy value")).toBe(true);
+    configureSecretAllowlist([highEntropy.slice(0, 12)]);
+    try {
+      expect(scanSecrets(highEntropy)).toEqual([]);
+      const apiKey = sample(["sk-ant-api03-", "abcdefghijklmnopqrstuvwxyz012345"]);
+      expect(scanSecrets(apiKey).some((item) => item.kind === "Anthropic API key")).toBe(true);
+    } finally {
+      configureSecretAllowlist([]);
+    }
   });
 });

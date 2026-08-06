@@ -150,8 +150,8 @@ Open any agent. Paste once. Done.
 | Claude Code | ✅ | `claude` | ✅ | `handoff enter` |
 | Codex | ✅ | `codex` | ✅ | `handoff enter` |
 | OpenCode | ✅ | `opencode` | ✅ | `handoff enter` |
-| GitHub Copilot CLI | ✅ | `copilot` | use `snap` / `go --goal` | — |
-| Cursor (`agent`) | ✅ | `agent` | use `snap` / `go --goal` | — |
+| GitHub Copilot CLI | ✅ | `copilot` | use `snap` / `go --goal` | `handoff enter` (weak: re-injects prompt) |
+| Cursor (`agent`) | ✅ | `agent` | use `snap` / `go --goal` | `handoff enter` (weak: `agent resume`) |
 | Human | Markdown | — | — | — |
 
 Launch never enables permission/sandbox bypass flags. If a CLI isn't installed, you still get a secret-scanned prompt file.
@@ -221,7 +221,7 @@ handoff enter webhook --to codex
 handoff enter webhook --to opencode
 ```
 
-Claude resumes by preallocated UUID. Codex resumes by recorded name, or `codex resume --last`. OpenCode resumes the newest session for the repository (`opencode --continue`, or an explicit `ses_*` id when `session list` can resolve it).
+Claude resumes by preallocated UUID. Codex resumes by recorded name, or `codex resume --last`. OpenCode resumes the newest matching session for the repository (`opencode --continue`, or an explicit `ses_*` id when `session list` can resolve by cwd, title, and launch time). Cursor uses `agent resume`. Copilot re-injects the saved handoff prompt from the launch receipt.
 
 </details>
 

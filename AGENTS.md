@@ -9,11 +9,9 @@ TaskHandoff (`agent-task-handoff`) is a single Node.js/TypeScript **CLI** publis
 - Run the CLI in dev mode with `pnpm dev -- <args>` (this is `tsx src/cli.ts`). The CLI acts on the **current working directory**, which must be a Git repo, so `cd` into a target repo (or a throwaway one) before invoking commands like `handoff snap`, `handoff go`, `handoff verify`, `handoff doctor`.
 - `pnpm test` **builds `dist/` first** and then runs `vitest run`; the integration tests in `test/cli.test.ts` execute the compiled `dist/cli.js`, so a stale/missing build is rebuilt automatically by the test script.
 
-### Non-obvious gotcha: the `handoff` binary must be on PATH for the full test suite
+### Non-obvious gotcha: the `handoff` binary must be on PATH for a fully green `doctor`
 
-One test (`test/cli.test.ts > runs init, checkpoint, inspect, verify, export, and import`) calls `handoff doctor --json`. The `doctor` command exits with code **2** whenever `ok` is false, and `ok = initialized && handoffCommand`, where `handoffCommand` is true only when a `handoff` executable is found on `PATH`. `execFileSync` turns that non-zero exit into a thrown error, so this test fails unless `handoff` is globally linked.
-
-To satisfy this, the `handoff` CLI is linked globally during environment setup via `pnpm link --global` (which requires pnpm's global bin dir, created once with `pnpm setup`; the resulting `PNPM_HOME`/PATH entry is in `~/.bashrc`). This link and PATH entry persist in the VM snapshot, so `pnpm test` should be fully green out of the box. If `handoff` is ever missing from PATH (e.g. `which handoff` fails), re-link it:
+`handoff doctor` sets `ok = initialized && handoffCommand`, where `handoffCommand` is true only when a `handoff` executable is found on `PATH`. The Vitest suite prepends a temporary `handoff` shim via `test/setup-path.ts`, so CI and local `pnpm test` do not require a global link. For interactive use outside tests, link the CLI:
 
 ```bash
 pnpm setup            # only if `pnpm link` reports no global bin dir; then start a new shell
