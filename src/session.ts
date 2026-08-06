@@ -89,19 +89,69 @@ function clip(text: string, max = 280): string {
   return `${cleaned.slice(0, Math.max(0, max - 1))}…`;
 }
 
+function normalizeKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 function uniqueStrings(values: string[], limit: number): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   for (const value of values) {
     const normalized = value.replace(/\s+/g, " ").trim();
     if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
+    const key = normalizeKey(normalized);
+    if (!key || seen.has(key)) continue;
+    // Drop near-duplicates that share a long stem with an earlier hit.
+    if ([...seen].some((existing) => {
+      if (existing.length < 24 || key.length < 24) return false;
+      return existing.includes(key.slice(0, 32)) || key.includes(existing.slice(0, 32));
+    })) continue;
     seen.add(key);
     result.push(normalized);
     if (result.length >= limit) break;
   }
   return result;
+}
+
+function scoreGoalCandidate(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed.length < 12 || isAckMessage(trimmed)) return -1;
+  let score = Math.min(trimmed.length, 240);
+  if (/\b(?:fix|implement|add|build|create|refactor|migrate|debug|investigate|finish|complete|修复|实现|完成|继续)\b/i.test(trimmed)) {
+    score += 40;
+  }
+  if (/\b(?:goal|task|acceptance|验收|目标)\b/i.test(trimmed)) score += 20;
+  if (/[\\/][\w.-]+\.[A-Za-z0-9]{1,10}\b/.test(trimmed)) score += 15;
+  if (isAckMessage(trimmed) || /^(?:please continue|继续|往下做)/i.test(trimmed)) score -= 30;
+  return score;
+}
+
+function pickGoal(userMessages: SessionMessage[]): string {
+  // Prefer the latest high-signal user turn so early setup chatter does not win.
+  let best: { text: string; score: number; index: number } | undefined;
+  userMessages.forEach((message, index) => {
+    const score = scoreGoalCandidate(message.text);
+    if (score < 0) return;
+    if (!best || score > best.score || (score === best.score && index > best.index)) {
+      best = { text: message.text, score, index };
+    }
+  });
+  return clip(best?.text ?? "Continue the unfinished task from the selected session", 2_000);
+}
+
+function dedupeAttempts(
+  attempts: Array<{ approach: string; reason: string }>,
+  limit: number
+): Array<{ approach: string; reason: string }> {
+  const approaches = uniqueStrings(attempts.map((item) => item.approach), limit);
+  return approaches.map((approach) => {
+    const match = attempts.find((item) => normalizeKey(item.approach) === normalizeKey(approach))
+      ?? attempts.find((item) => normalizeKey(item.approach).includes(normalizeKey(approach).slice(0, 24)));
+    return {
+      approach,
+      reason: match?.reason ?? "Extracted from visible session text; re-verify before retrying."
+    };
+  });
 }
 
 function firstSentence(text: string, max = 280): string {
@@ -340,15 +390,26 @@ function loadOpenCodeCandidate(repositoryRoot: string, selector: string): Sessio
   return parseOpenCodeExport(exported.stdout, `opencode:${selected.id}`);
 }
 
+export interface OpenCodeResumeOptions {
+  sessionName?: string;
+  /** ISO timestamp from the launch receipt; prefer sessions updated around/after launch. */
+  launchedAt?: string;
+  /** Ignore repo sessions older than this window relative to launchedAt (default 7 days). */
+  maxAgeMs?: number;
+}
+
 /**
  * Prefer an explicit OpenCode session id for resume. When the launch receipt
- * only recorded `__last__`, resolve the newest session for this repository.
+ * only recorded `__last__`, resolve by cwd, then title, then launch-time window.
  */
 export function resolveOpenCodeResumeSessionId(
   repositoryRoot: string,
   sessionId: string,
-  sessionName?: string
+  sessionNameOrOptions?: string | OpenCodeResumeOptions
 ): string {
+  const options: OpenCodeResumeOptions = typeof sessionNameOrOptions === "string"
+    ? { sessionName: sessionNameOrOptions }
+    : sessionNameOrOptions ?? {};
   if (sessionId !== "__last__") return sessionId;
   if (!commandExists("opencode")) return sessionId;
   const listed = runCommand("opencode", ["session", "list", "--format", "json"], {
@@ -366,12 +427,35 @@ export function resolveOpenCodeResumeSessionId(
     const inRepo = sessions.filter((session) =>
       typeof session.directory === "string" && resolve(session.directory) === resolve(repositoryRoot)
     );
-    if (sessionName) {
-      const byTitle = inRepo.find((session) =>
-        typeof session.title === "string" && session.title === sessionName
+    if (inRepo.length === 0) return sessionId;
+
+    if (options.sessionName) {
+      const exact = inRepo.find((session) =>
+        typeof session.title === "string" && session.title === options.sessionName
       );
-      if (typeof byTitle?.id === "string") return byTitle.id;
+      if (typeof exact?.id === "string") return exact.id;
+      const partial = inRepo.find((session) =>
+        typeof session.title === "string"
+        && options.sessionName
+        && session.title.toLowerCase().includes(options.sessionName.toLowerCase())
+      );
+      if (typeof partial?.id === "string") return partial.id;
     }
+
+    const launchedAtMs = options.launchedAt ? Date.parse(options.launchedAt) : Number.NaN;
+    const maxAgeMs = options.maxAgeMs ?? 7 * 24 * 60 * 60 * 1000;
+    if (Number.isFinite(launchedAtMs)) {
+      const inWindow = inRepo.filter((session) => {
+        const updated = Number(session.updated ?? 0);
+        // OpenCode may report seconds or milliseconds.
+        const updatedMs = updated < 1_000_000_000_000 ? updated * 1000 : updated;
+        if (!Number.isFinite(updatedMs) || updatedMs <= 0) return false;
+        // Allow a small clock skew before launch, then keep recent sessions.
+        return updatedMs >= launchedAtMs - 60_000 && updatedMs <= launchedAtMs + maxAgeMs;
+      });
+      if (typeof inWindow[0]?.id === "string") return inWindow[0].id;
+    }
+
     const latest = inRepo[0];
     return typeof latest?.id === "string" ? latest.id : sessionId;
   } catch {
@@ -404,32 +488,35 @@ export function draftFromSession(candidate: SessionCandidate, maxMessages = 80):
   const assistantMessages = messages.filter((message) => message.role === "assistant");
   const userTexts = userMessages.map((message) => message.text);
   const assistantTexts = assistantMessages.map((message) => message.text);
-
-  const goalSource = userMessages.find((message) => message.text.trim().length >= 20 && !isAckMessage(message.text))
-    ?? [...userMessages].reverse().find((message) => message.text.trim().length >= 12)
-    ?? userMessages.at(-1);
-  const goal = clip(goalSource?.text ?? "Continue the unfinished task from the selected session", 2_000);
+  const goal = pickGoal(userMessages);
 
   const completed = collectMatchingSentences(
     assistantTexts,
     /\b(?:completed|implemented|fixed|added|updated|created|resolved|located|verified|通过|完成|已实现|已修复|已添加|已更新)\b/i,
     5
   );
+  // Only fall back to the last assistant sentence when it looks like progress, not planning.
   if (completed.length === 0 && assistantMessages.length > 0) {
-    completed.push(firstSentence(assistantMessages.at(-1)!.text));
+    const last = firstSentence(assistantMessages.at(-1)!.text);
+    if (/\b(?:completed|implemented|fixed|added|updated|created|resolved|located|verified|通过|完成|已实现|已修复)\b/i.test(last)) {
+      completed.push(last);
+    }
   }
   if (candidate.commands.length > 0) {
     completed.push(`Observed commands: ${uniqueStrings(candidate.commands.slice(-5), 5).join("; ")}`);
   }
 
-  const attempts = collectMatchingSentences(
-    [...assistantTexts, ...userTexts],
-    /\b(?:failed|didn't work|did not work|does not work|rejected|broke|regressed|regression|报错|失败|不行)\b/i,
+  const attempts = dedupeAttempts(
+    collectMatchingSentences(
+      [...assistantTexts, ...userTexts],
+      /\b(?:failed|didn't work|did not work|does not work|rejected|broke|regressed|regression|报错|失败|不行)\b/i,
+      8
+    ).map((approach) => ({
+      approach,
+      reason: "Extracted from visible session text; re-verify before retrying."
+    })),
     4
-  ).map((approach) => ({
-    approach,
-    reason: "Extracted from visible session text; re-verify before retrying."
-  }));
+  );
 
   const blockers = collectMatchingSentences(
     [...userTexts, ...assistantTexts],
@@ -455,15 +542,16 @@ export function draftFromSession(candidate: SessionCandidate, maxMessages = 80):
     4
   );
 
-  const lastUser = userMessages.at(-1);
-  const nextFromPending = pending[0];
+  // Prefer later pending / last substantive user instruction over early planning text.
+  const lastUser = [...userMessages].reverse().find((message) =>
+    !isAckMessage(message.text) && message.text.trim().length >= 12
+  );
+  const nextFromPending = pending.at(-1) ?? pending[0];
   const nextFromAssistant = [...assistantMessages].reverse().find((message) =>
     /next(?:\s+step)?|continue(?:\s+by|\s+with)?|should\s+(?:now|next)|接下来|下一步/i.test(message.text)
   );
   const nextAction = nextFromPending
-    ?? (lastUser && !isAckMessage(lastUser.text) && lastUser.text.trim().length >= 12
-      ? firstSentence(lastUser.text)
-      : undefined)
+    ?? (lastUser ? firstSentence(lastUser.text) : undefined)
     ?? (nextFromAssistant ? firstSentence(nextFromAssistant.text) : undefined)
     ?? "Verify the recorded repository state and continue the unfinished task.";
 

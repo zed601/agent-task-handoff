@@ -13,13 +13,45 @@ export interface LaunchOptions {
   sessionName?: string;
 }
 
-function line(item: SourcedText): string {
-  const evidence = item.evidence.length > 0 ? `; evidence: ${item.evidence.join(", ")}` : "";
-  return `- [${item.provenance}] ${item.text}${evidence}`;
+export interface ResumeOptions {
+  /** Used for weak Copilot re-entry that re-injects the saved handoff prompt. */
+  prompt?: string;
 }
 
-function section(title: string, values: SourcedText[]): string {
-  return `## ${title}\n${values.length > 0 ? values.map(line).join("\n") : "- None recorded"}`;
+const PROMPT_LIMITS = {
+  acceptance: 8,
+  completed: 8,
+  pending: 8,
+  decisions: 6,
+  attempts: 6,
+  blockers: 6,
+  verification: 8,
+  contextRefs: 20,
+  text: 400
+} as const;
+
+function clipText(value: string, max = PROMPT_LIMITS.text): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function trimList<T>(values: T[], limit: number): { items: T[]; hidden: number } {
+  if (values.length <= limit) return { items: values, hidden: 0 };
+  return { items: values.slice(0, limit), hidden: values.length - limit };
+}
+
+function line(item: SourcedText): string {
+  const evidence = item.evidence.length > 0 ? `; evidence: ${item.evidence.join(", ")}` : "";
+  return `- [${item.provenance}] ${clipText(item.text)}${evidence}`;
+}
+
+function section(title: string, values: SourcedText[], limit: number): string {
+  const { items, hidden } = trimList(values, limit);
+  if (items.length === 0) return `## ${title}\n- None recorded`;
+  const body = items.map(line).join("\n");
+  const suffix = hidden > 0 ? `\n- … ${hidden} more omitted; see checkpoint revision for the full list.` : "";
+  return `## ${title}\n${body}${suffix}`;
 }
 
 function changedFilesSummary(paths: string[]): string {
@@ -48,20 +80,32 @@ export function renderHandoffPrompt(
   target: TargetAgent,
   options: HandoffPromptOptions = {}
 ): string {
-  const attempts = checkpoint.attempts.length > 0
-    ? checkpoint.attempts.map((attempt) =>
-      `- [${attempt.result}] ${attempt.approach.text} — ${attempt.reason.text}`
+  const attemptsTrim = trimList(checkpoint.attempts, PROMPT_LIMITS.attempts);
+  const attempts = attemptsTrim.items.length > 0
+    ? attemptsTrim.items.map((attempt) =>
+      `- [${attempt.result}] ${clipText(attempt.approach.text)} — ${clipText(attempt.reason.text)}`
     ).join("\n")
+      + (attemptsTrim.hidden > 0
+        ? `\n- … ${attemptsTrim.hidden} more omitted; see checkpoint revision for the full list.`
+        : "")
     : "- None recorded";
-  const verification = checkpoint.verification.length > 0
-    ? checkpoint.verification.map((item) =>
-      `- \`${item.command}\` exited ${item.exitCode} at ${item.recordedAt}: ${item.outputSummary}`
+  const verificationTrim = trimList(checkpoint.verification, PROMPT_LIMITS.verification);
+  const verification = verificationTrim.items.length > 0
+    ? verificationTrim.items.map((item) =>
+      `- \`${item.command}\` exited ${item.exitCode} at ${item.recordedAt}: ${clipText(item.outputSummary, 200)}`
     ).join("\n")
+      + (verificationTrim.hidden > 0
+        ? `\n- … ${verificationTrim.hidden} more omitted; see checkpoint revision for the full list.`
+        : "")
     : "- None recorded";
-  const refs = checkpoint.contextRefs.length > 0
-    ? checkpoint.contextRefs.map((ref) =>
-      `- ${ref.path}${ref.symbols.length > 0 ? ` (${ref.symbols.join(", ")})` : ""}: ${ref.reason}`
+  const refsTrim = trimList(checkpoint.contextRefs, PROMPT_LIMITS.contextRefs);
+  const refs = refsTrim.items.length > 0
+    ? refsTrim.items.map((ref) =>
+      `- ${ref.path}${ref.symbols.length > 0 ? ` (${ref.symbols.join(", ")})` : ""}: ${clipText(ref.reason, 160)}`
     ).join("\n")
+      + (refsTrim.hidden > 0
+        ? `\n- … ${refsTrim.hidden} more omitted; see checkpoint revision for the full list.`
+        : "")
     : "- None recorded";
   const stale = checkpoint.freshness.stale
     ? `STALE: ${checkpoint.freshness.reasons.join("; ")}`
@@ -69,20 +113,28 @@ export function renderHandoffPrompt(
   const targetSession = options.sessionName
     ? `## Target session\nName this ${target} session exactly: ${options.sessionName}\n\n`
     : "";
+  const goal = {
+    ...checkpoint.task.goal,
+    text: clipText(checkpoint.task.goal.text, 800)
+  };
+  const nextAction = {
+    ...checkpoint.nextAction,
+    text: clipText(checkpoint.nextAction.text, 500)
+  };
 
   return `# Task handoff for ${target}\n\n` +
     `You are taking over an unfinished coding task. Treat observed evidence as facts, user-stated items as requirements, and agent-inferred items as hypotheses that must be checked.\n\n` +
     targetSession +
     `Before changing code:\n1. Confirm the repository HEAD and working tree match the recorded state.\n2. Re-run or inspect stale verification evidence.\n3. Do not retry rejected or failed approaches unless new evidence justifies it.\n4. Continue from the recorded next action and preserve existing user changes.\n\n` +
-    `## Task\n${line(checkpoint.task.goal)}\n` +
+    `## Task\n${line(goal)}\n` +
     `Status: ${checkpoint.task.status}\n\n` +
-    section("Acceptance criteria", checkpoint.task.acceptance) + "\n\n" +
-    section("Completed", checkpoint.progress.completed) + "\n\n" +
-    section("Pending", checkpoint.progress.pending) + "\n\n" +
-    section("Decisions", checkpoint.decisions) + "\n\n" +
+    section("Acceptance criteria", checkpoint.task.acceptance, PROMPT_LIMITS.acceptance) + "\n\n" +
+    section("Completed", checkpoint.progress.completed, PROMPT_LIMITS.completed) + "\n\n" +
+    section("Pending", checkpoint.progress.pending, PROMPT_LIMITS.pending) + "\n\n" +
+    section("Decisions", checkpoint.decisions, PROMPT_LIMITS.decisions) + "\n\n" +
     `## Attempts not to repeat\n${attempts}\n\n` +
-    section("Blockers", checkpoint.blockers) + "\n\n" +
-    `## Next action\n${line(checkpoint.nextAction)}\n\n` +
+    section("Blockers", checkpoint.blockers, PROMPT_LIMITS.blockers) + "\n\n" +
+    `## Next action\n${line(nextAction)}\n\n` +
     `## Repository evidence\n- Root: ${checkpoint.repository.root}\n- Branch: ${checkpoint.repository.branch}\n- HEAD: ${checkpoint.repository.head}\n- Dirty: ${checkpoint.repository.dirty}\n${changedFilesSummary(checkpoint.repository.changedFiles)}\n- Freshness: ${stale}\n\n` +
     `## Verification evidence\n${verification}\n\n` +
     `## Relevant context\n${refs}\n\n` +
@@ -171,7 +223,8 @@ export function launchSpec(
 export function resumeLaunchSpec(
   target: TargetAgent,
   repositoryRoot: string,
-  sessionId: string
+  sessionId: string,
+  options: ResumeOptions = {}
 ): { command: string; args: string[]; cwd: string } {
   if (target === "claude") {
     return {
@@ -198,10 +251,35 @@ export function resumeLaunchSpec(
       cwd: repositoryRoot
     };
   }
+  if (target === "cursor") {
+    // Cursor keeps session state itself; reopen the last agent session in this repo.
+    return {
+      command: "agent",
+      args: ["resume"],
+      cwd: repositoryRoot
+    };
+  }
+  if (target === "copilot") {
+    // Copilot has no compatible session export/resume id; re-inject the saved prompt.
+    if (!options.prompt?.trim()) {
+      throw new Error("Copilot re-entry requires the saved handoff prompt from the launch receipt");
+    }
+    return {
+      command: "copilot",
+      args: ["-C", repositoryRoot, "-i", options.prompt],
+      cwd: repositoryRoot
+    };
+  }
   throw new Error(`Native session re-entry is not implemented for ${target}`);
 }
 
 /** Agents that TaskHandoff can reopen via `handoff enter`. */
 export function supportsNativeEnter(target: TargetAgent): boolean {
-  return target === "claude" || target === "codex" || target === "opencode";
+  return TARGET_AGENTS.includes(target);
+}
+
+/** Strong native resume (UUID/name) vs weak re-entry (resume last / re-inject prompt). */
+export function enterMode(target: TargetAgent): "native" | "weak" {
+  if (target === "copilot" || target === "cursor") return "weak";
+  return "native";
 }

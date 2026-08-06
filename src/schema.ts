@@ -94,6 +94,11 @@ export const configSchema = z.object({
   defaultAgent: z.enum(["codex", "claude", "opencode", "copilot", "cursor"]).default("codex"),
   defaultExec: z.boolean().default(false),
   secretScan: z.boolean().default(true),
+  /**
+   * Substrings that suppress high-entropy findings only.
+   * Known credential patterns are never allowlisted.
+   */
+  secretAllowlist: z.array(z.string().min(1)).default([]),
   maxSessionMessages: z.number().int().positive().max(500).default(80)
 });
 

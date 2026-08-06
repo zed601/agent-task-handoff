@@ -31,6 +31,35 @@ export interface SecretFinding {
   preview: string;
 }
 
+export interface SecretAllowlist {
+  /**
+   * Substrings that suppress high-entropy findings only.
+   * Known credential patterns (API keys, private keys, etc.) are never allowlisted.
+   */
+  patterns: string[];
+}
+
+const DEFAULT_ALLOWLIST: SecretAllowlist = { patterns: [] };
+let activeAllowlist: SecretAllowlist = DEFAULT_ALLOWLIST;
+
+/** Configure allowlist patterns for high-entropy findings (repo config / tests). */
+export function configureSecretAllowlist(allowlist?: SecretAllowlist | string[]): void {
+  if (!allowlist) {
+    activeAllowlist = DEFAULT_ALLOWLIST;
+    return;
+  }
+  const patterns = Array.isArray(allowlist) ? allowlist : allowlist.patterns;
+  activeAllowlist = {
+    patterns: patterns
+      .map((pattern) => pattern.trim())
+      .filter((pattern) => pattern.length > 0)
+  };
+}
+
+export function getSecretAllowlist(): SecretAllowlist {
+  return { patterns: [...activeAllowlist.patterns] };
+}
+
 function entropy(value: string): number {
   const counts = new Map<string, number>();
   for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);
@@ -56,6 +85,11 @@ function looksLikeNonSecretToken(candidate: string): boolean {
   return false;
 }
 
+function isAllowlistedHighEntropy(candidate: string): boolean {
+  if (activeAllowlist.patterns.length === 0) return false;
+  return activeAllowlist.patterns.some((pattern) => candidate.includes(pattern));
+}
+
 function scanString(value: string, path: string): SecretFinding[] {
   const findings: SecretFinding[] = [];
   for (const item of secretPatterns) {
@@ -69,6 +103,7 @@ function scanString(value: string, path: string): SecretFinding[] {
   const candidates = value.match(/\b[A-Za-z0-9+/=_-]{32,120}\b/g) ?? [];
   for (const candidate of candidates) {
     if (looksLikeNonSecretToken(candidate)) continue;
+    if (isAllowlistedHighEntropy(candidate)) continue;
     if (entropy(candidate) >= 4.5) {
       findings.push({ path, kind: "high-entropy value", preview: preview(candidate) });
     }

@@ -14,7 +14,7 @@ import {
   checkpointSchema,
   configSchema
 } from "./schema.js";
-import { assertNoSecrets } from "./security.js";
+import { assertNoSecrets, configureSecretAllowlist } from "./security.js";
 
 export const HANDOFF_DIRECTORY = ".handoff";
 
@@ -63,6 +63,7 @@ export function initializeHandoff(repositoryRoot: string): HandoffConfig {
     defaultAgent: "codex",
     defaultExec: false,
     secretScan: true,
+    secretAllowlist: [],
     maxSessionMessages: 80
   };
   const configPath = join(root, "config.yaml");
@@ -164,7 +165,9 @@ export function loadConfig(repositoryRoot: string): HandoffConfig {
   if (!existsSync(path)) {
     throw new Error("TaskHandoff is not initialized. Run `handoff init` first.");
   }
-  return configSchema.parse(YAML.parse(readFileSync(path, "utf8")));
+  const config = configSchema.parse(YAML.parse(readFileSync(path, "utf8")));
+  configureSecretAllowlist(config.secretAllowlist);
+  return config;
 }
 
 function taskDirectory(repositoryRoot: string, taskId: string): string {

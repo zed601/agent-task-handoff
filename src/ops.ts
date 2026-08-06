@@ -16,6 +16,7 @@ import {
   renderHandoffPrompt,
   renderHumanHandoff,
   supportsNativeEnter,
+  enterMode,
   TARGET_AGENTS,
   type TargetAgent,
   type HandoffTarget
@@ -477,8 +478,8 @@ export async function resumeCheckpoint(
       targetSessionId = randomUUID();
     } else if (target === "codex") {
       targetSessionId = targetSessionName ?? "__last__";
-    } else if (target === "opencode") {
-      // OpenCode assigns ses_* IDs itself; resume the newest session in this repo.
+    } else if (target === "opencode" || target === "cursor" || target === "copilot") {
+      // These CLIs assign or keep session identity themselves; resume via receipt + weak enter.
       targetSessionId = "__last__";
     }
     const spec = launchSpec(target, root, prompt, {
@@ -507,9 +508,16 @@ export async function resumeCheckpoint(
         ? `claude --resume ${targetSessionId}`
         : target === "opencode"
           ? "opencode --continue"
-          : targetSessionId === "__last__"
-            ? "codex resume --last"
-            : `codex resume ${targetSessionId}`;
+          : target === "cursor"
+            ? "agent resume"
+            : target === "copilot"
+              ? `handoff enter ${checkpoint.taskId} --to copilot`
+              : targetSessionId === "__last__"
+                ? "codex resume --last"
+                : `codex resume ${targetSessionId}`;
+      if (enterMode(target) === "weak" && options.print !== false) {
+        console.log(`Note: ${target} re-entry is weak (no portable session export). Use: handoff enter ${checkpoint.taskId} --to ${target}`);
+      }
     }
     if (launchMode === "terminal") {
       if (!outputPath) throw new Error("A saved prompt is required for terminal launch mode");
