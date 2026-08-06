@@ -43,13 +43,13 @@ Pass `--to` only when multiple agents are installed and `defaultAgent` is unset/
 
 Report stale reasons from the receipt instead of hiding them. If clipboard access is unavailable, direct the user to the prompt file. Use `--no-copy` only when the user asks not to touch the clipboard. Add `--no-exec` when the user wants a prompt without launching.
 
-For Claude, a successful launch assigns the exact name through Claude's native `--name` option, preallocates a native session UUID, and saves a launch receipt under `.handoff/launches/`. For Codex, a successful launch saves a receipt keyed by the session name (or `__last__`) so `handoff enter` can run `codex resume <name>` or `codex resume --last`. When invoked from an agent-hosted process, the default `auto` launch mode opens a visible OS terminal window on macOS, Linux, and Windows. Use `--launch-mode inline` only when the user explicitly wants the current terminal. To return to a session that TaskHandoff launched earlier, use `handoff enter`; it resumes the recorded identity and does not resend the recovery prompt.
+For Claude, a successful launch assigns the exact name through Claude's native `--name` option, preallocates a native session UUID, and saves a launch receipt under `.handoff/launches/`. For Codex, a successful launch saves a receipt keyed by the session name (or `__last__`) so `handoff enter` can run `codex resume <name>` or `codex resume --last`. For OpenCode, a successful launch saves a `__last__` receipt so `handoff enter` can resolve the newest repo session via `opencode session list` (or fall back to `opencode --continue`). When invoked from an agent-hosted process, the default `auto` launch mode opens a visible OS terminal window on macOS, Linux, and Windows. Use `--launch-mode inline` only when the user explicitly wants the current terminal. To return to a session that TaskHandoff launched earlier, use `handoff enter`; it resumes the recorded identity and does not resend the recovery prompt.
 
 Copilot and Cursor cannot be used as `--from` rescue sources; use `handoff snap` / `handoff go --goal ...` from the visible conversation instead.
 
 ## Rescue prior sessions
 
-Use `handoff go --from claude|codex|opencode` only when the user wants to recover a prior local session. Explain that session extraction is experimental and requires review. Add `--summarize` only for Claude or Codex after the user accepts possible model usage and network cost.
+Use `handoff go --from claude|codex|opencode` only when the user wants to recover a prior local session. Explain that session extraction is experimental and requires review. Add `--summarize` after the user accepts possible model usage and network cost for Claude or Codex; for OpenCode, `--summarize` uses the local heuristic draft (no extra model call).
 
 ## Report the result
 

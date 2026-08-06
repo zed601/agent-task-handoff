@@ -39,6 +39,8 @@ describe("target renderers", () => {
       cwd: "/repo"
     });
     expect(launchSpec("opencode", "/repo", "prompt").args).toEqual(["/repo", "--prompt", "prompt"]);
+    expect(launchSpec("opencode", "/repo", "prompt", { sessionId: "ses_abc" }).args)
+      .toEqual(["/repo", "--session", "ses_abc", "--prompt", "prompt"]);
     expect(launchSpec("claude", "/repo", "prompt", {
       sessionId: "d018c05a-0552-4c0d-9aef-2471cb6d225d",
       sessionName: "handoff-payments"
@@ -63,7 +65,7 @@ describe("target renderers", () => {
     });
   });
 
-  it("resumes Claude by UUID and Codex by name or last", () => {
+  it("resumes Claude by UUID, Codex by name or last, and OpenCode by continue or session", () => {
     expect(resumeLaunchSpec("claude", "/repo", "d018c05a-0552-4c0d-9aef-2471cb6d225d")).toEqual({
       command: "claude",
       args: ["--resume", "d018c05a-0552-4c0d-9aef-2471cb6d225d"],
@@ -77,6 +79,16 @@ describe("target renderers", () => {
     expect(resumeLaunchSpec("codex", "/repo", "__last__")).toEqual({
       command: "codex",
       args: ["resume", "--last"],
+      cwd: "/repo"
+    });
+    expect(resumeLaunchSpec("opencode", "/repo", "__last__")).toEqual({
+      command: "opencode",
+      args: ["/repo", "--continue"],
+      cwd: "/repo"
+    });
+    expect(resumeLaunchSpec("opencode", "/repo", "ses_abc")).toEqual({
+      command: "opencode",
+      args: ["/repo", "--session", "ses_abc"],
       cwd: "/repo"
     });
     expect(() => resumeLaunchSpec("cursor", "/repo", "x")).toThrow(/not implemented/);

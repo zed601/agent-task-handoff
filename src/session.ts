@@ -340,6 +340,45 @@ function loadOpenCodeCandidate(repositoryRoot: string, selector: string): Sessio
   return parseOpenCodeExport(exported.stdout, `opencode:${selected.id}`);
 }
 
+/**
+ * Prefer an explicit OpenCode session id for resume. When the launch receipt
+ * only recorded `__last__`, resolve the newest session for this repository.
+ */
+export function resolveOpenCodeResumeSessionId(
+  repositoryRoot: string,
+  sessionId: string,
+  sessionName?: string
+): string {
+  if (sessionId !== "__last__") return sessionId;
+  if (!commandExists("opencode")) return sessionId;
+  const listed = runCommand("opencode", ["session", "list", "--format", "json"], {
+    cwd: repositoryRoot,
+    allowFailure: true
+  });
+  if (listed.exitCode !== 0) return sessionId;
+  try {
+    const parsed = JSON.parse(listed.stdout) as unknown;
+    if (!Array.isArray(parsed)) return sessionId;
+    const sessions = parsed.filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object"
+    );
+    sessions.sort((left, right) => Number(right.updated ?? 0) - Number(left.updated ?? 0));
+    const inRepo = sessions.filter((session) =>
+      typeof session.directory === "string" && resolve(session.directory) === resolve(repositoryRoot)
+    );
+    if (sessionName) {
+      const byTitle = inRepo.find((session) =>
+        typeof session.title === "string" && session.title === sessionName
+      );
+      if (typeof byTitle?.id === "string") return byTitle.id;
+    }
+    const latest = inRepo[0];
+    return typeof latest?.id === "string" ? latest.id : sessionId;
+  } catch {
+    return sessionId;
+  }
+}
+
 export function loadSessionCandidate(
   agent: SessionAgent,
   repositoryRoot: string,
@@ -473,8 +512,10 @@ function findDraft(value: unknown): SessionDraft | undefined {
 }
 
 export function summarizeSession(candidate: SessionCandidate): SessionDraft {
+  // OpenCode has no structured-output schema flag comparable to Claude/Codex.
+  // Prefer the local heuristic draft over refusing --summarize entirely.
   if (candidate.agent === "opencode") {
-    throw new Error("Structured --summarize currently supports Claude and Codex sessions only");
+    return draftFromSession(candidate);
   }
   if (!commandExists(candidate.agent)) {
     throw new Error(`${candidate.agent} CLI is not installed`);

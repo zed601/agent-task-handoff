@@ -244,7 +244,7 @@ export function doctorNextSteps(input: {
         ? `Continue with: handoff go`
         : `Render a handoff: handoff go --to human`
     );
-    if (preferred === "claude" || preferred === "codex") {
+    if (preferred === "claude" || preferred === "codex" || preferred === "opencode") {
       steps.push(`Re-enter the last ${preferred} launch: handoff enter`);
     }
   }
@@ -477,6 +477,9 @@ export async function resumeCheckpoint(
       targetSessionId = randomUUID();
     } else if (target === "codex") {
       targetSessionId = targetSessionName ?? "__last__";
+    } else if (target === "opencode") {
+      // OpenCode assigns ses_* IDs itself; resume the newest session in this repo.
+      targetSessionId = "__last__";
     }
     const spec = launchSpec(target, root, prompt, {
       sessionId: targetSessionId,
@@ -502,9 +505,11 @@ export async function resumeCheckpoint(
       });
       resumeCommand = target === "claude"
         ? `claude --resume ${targetSessionId}`
-        : targetSessionId === "__last__"
-          ? "codex resume --last"
-          : `codex resume ${targetSessionId}`;
+        : target === "opencode"
+          ? "opencode --continue"
+          : targetSessionId === "__last__"
+            ? "codex resume --last"
+            : `codex resume ${targetSessionId}`;
     }
     if (launchMode === "terminal") {
       if (!outputPath) throw new Error("A saved prompt is required for terminal launch mode");

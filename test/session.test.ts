@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { draftFromSession, parseSessionFile, sessionSummaryJsonSchema, summarizeSession } from "../src/session.js";
+import { draftFromSession, parseSessionFile, resolveOpenCodeResumeSessionId, sessionSummaryJsonSchema, summarizeSession } from "../src/session.js";
 
 describe("session adapters", () => {
   it("parses Codex JSONL and ignores malformed or unknown records", () => {
@@ -100,13 +100,42 @@ describe("session adapters", () => {
     }
   });
 
-  it("does not claim structured OpenCode summarization support", () => {
-    expect(() => summarizeSession({
+  it("uses local heuristic drafts for OpenCode --summarize", () => {
+    const draft = summarizeSession({
       agent: "opencode",
       path: "opencode:fixture",
-      messages: [],
-      commands: [],
-      files: []
-    })).toThrow("supports Claude and Codex");
+      messages: [
+        { role: "user", text: "Finish the webhook retry queue in src/webhook.ts" },
+        { role: "assistant", text: "I implemented the first worker loop. Next step is add backoff." }
+      ],
+      commands: ["pnpm test"],
+      files: ["src/webhook.ts"]
+    });
+    expect(draft.goal).toMatch(/webhook retry queue/i);
+    expect(draft.completed.some((item) => /worker loop|pnpm test/i.test(item))).toBe(true);
+    expect(draft.nextAction).toMatch(/backoff/i);
+  });
+
+  it("resolves OpenCode resume ids from session list when receipt is __last__", () => {
+    const root = mkdtempSync(join(tmpdir(), "handoff-opencode-repo-"));
+    const bin = mkdtempSync(join(tmpdir(), "handoff-opencode-bin-"));
+    const executable = join(bin, "opencode");
+    writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "session" ] && [ "$2" = "list" ]; then
+  printf '%s' "[{\\"id\\":\\"ses_old\\",\\"directory\\":\\"/other\\",\\"title\\":\\"other\\",\\"updated\\":1},{\\"id\\":\\"ses_new\\",\\"directory\\":\\"${root}\\",\\"title\\":\\"handoff-login\\",\\"updated\\":9}]"
+  exit 0
+fi
+exit 1
+`, "utf8");
+    chmodSync(executable, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    try {
+      expect(resolveOpenCodeResumeSessionId(root, "__last__", "handoff-login")).toBe("ses_new");
+      expect(resolveOpenCodeResumeSessionId(root, "__last__")).toBe("ses_new");
+      expect(resolveOpenCodeResumeSessionId(root, "ses_explicit")).toBe("ses_explicit");
+    } finally {
+      process.env.PATH = originalPath;
+    }
   });
 });

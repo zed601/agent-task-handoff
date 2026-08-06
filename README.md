@@ -77,7 +77,7 @@ The receiving agent is told exactly what to trust — and what to re-verify befo
 snap   →  capture goal + dirty files in one breath
 verify →  freshness check + secret scan (non-negotiable)
 go     →  deliver prompt, copy fallback, launch target CLI
-enter  →  reopen the native Claude / Codex session you launched
+enter  →  reopen the native Claude / Codex / OpenCode session you launched
 ```
 
 No DAG orchestrator. No multi-agent religion. Just continuity you can prove.
@@ -149,7 +149,7 @@ Open any agent. Paste once. Done.
 |---|:-:|:-:|:-:|:-:|
 | Claude Code | ✅ | `claude` | ✅ | `handoff enter` |
 | Codex | ✅ | `codex` | ✅ | `handoff enter` |
-| OpenCode | ✅ | `opencode` | ✅ experimental | — |
+| OpenCode | ✅ | `opencode` | ✅ | `handoff enter` |
 | GitHub Copilot CLI | ✅ | `copilot` | use `snap` / `go --goal` | — |
 | Cursor (`agent`) | ✅ | `agent` | use `snap` / `go --goal` | — |
 | Human | Markdown | — | — | — |
@@ -218,9 +218,10 @@ Extracted claims are marked `agent-inferred` until you review them.
 handoff enter
 handoff enter webhook --to claude
 handoff enter webhook --to codex
+handoff enter webhook --to opencode
 ```
 
-Claude resumes by preallocated UUID. Codex resumes by recorded name, or `codex resume --last`.
+Claude resumes by preallocated UUID. Codex resumes by recorded name, or `codex resume --last`. OpenCode resumes the newest session for the repository (`opencode --continue`, or an explicit `ses_*` id when `session list` can resolve it).
 
 </details>
 

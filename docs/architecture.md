@@ -28,7 +28,9 @@ The protocol records task state, not model hidden state or chain-of-thought. Rep
 
 The Codex adapter accepts `session_meta`, `event_msg`, and `response_item` records. The Claude adapter accepts top-level `user` and `assistant` records, ignores sidechains and attachments, and extracts only visible text plus limited tool metadata. The OpenCode adapter selects sessions through `opencode session list --format json` and parses an in-memory `opencode export`; reasoning and tool output are ignored. Unknown and malformed records are ignored so format additions do not crash local extraction.
 
-Local draft extraction (the default without `--summarize`) mines visible transcript text for goal, acceptance, completed work, pending next steps, decisions, failed attempts, and blockers, then clips long phrases and deduplicates. Observed commands are recorded as completed evidence. Claude/Codex session discovery caps at the 80 most recently modified `.jsonl` files so large session trees do not stall rescue. Agent summarization remains opt-in for Claude and Codex only; its result remains `agent-inferred`.
+Local draft extraction (the default without `--summarize`) mines visible transcript text for goal, acceptance, completed work, pending next steps, decisions, failed attempts, and blockers, then clips long phrases and deduplicates. Observed commands are recorded as completed evidence. Claude/Codex session discovery caps at the 80 most recently modified `.jsonl` files so large session trees do not stall rescue. `--summarize` remains model-backed for Claude and Codex; for OpenCode it reuses the local heuristic draft because OpenCode has no structured-output schema flag. Agent-inferred provenance still applies to rescued drafts.
+
+OpenCode launches record a `__last__` receipt and can be re-entered with `handoff enter`, which prefers an explicit `ses_*` id from `opencode session list` when available and otherwise falls back to `opencode --continue`.
 
 A session is selected only when its recorded `cwd` resolves to the current repository, unless the user supplies an exact session ID.
 

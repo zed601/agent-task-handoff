@@ -149,7 +149,18 @@ export function launchSpec(
         cwd: repositoryRoot
       };
     case "opencode":
-      return { command: "opencode", args: [repositoryRoot, "--prompt", prompt], cwd: repositoryRoot };
+      return {
+        command: "opencode",
+        args: [
+          repositoryRoot,
+          ...(options.sessionId && options.sessionId !== "__last__"
+            ? ["--session", options.sessionId]
+            : []),
+          "--prompt",
+          prompt
+        ],
+        cwd: repositoryRoot
+      };
     case "copilot":
       return { command: "copilot", args: ["-C", repositoryRoot, "-i", prompt], cwd: repositoryRoot };
     case "cursor":
@@ -178,10 +189,19 @@ export function resumeLaunchSpec(
       cwd: repositoryRoot
     };
   }
+  if (target === "opencode") {
+    return {
+      command: "opencode",
+      args: sessionId === "__last__"
+        ? [repositoryRoot, "--continue"]
+        : [repositoryRoot, "--session", sessionId],
+      cwd: repositoryRoot
+    };
+  }
   throw new Error(`Native session re-entry is not implemented for ${target}`);
 }
 
 /** Agents that TaskHandoff can reopen via `handoff enter`. */
 export function supportsNativeEnter(target: TargetAgent): boolean {
-  return target === "claude" || target === "codex";
+  return target === "claude" || target === "codex" || target === "opencode";
 }

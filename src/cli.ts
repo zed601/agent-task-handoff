@@ -24,7 +24,7 @@ import {
 } from "./render.js";
 import { type Checkpoint } from "./schema.js";
 import { assertNoSecrets } from "./security.js";
-import { type SessionAgent } from "./session.js";
+import { resolveOpenCodeResumeSessionId, type SessionAgent } from "./session.js";
 import {
   checkpointLabel,
   exportCheckpoint,
@@ -404,9 +404,9 @@ program.command("go")
 
 program.command("enter")
   .alias("reopen")
-  .description("Re-enter the latest launched Claude or Codex session")
+  .description("Re-enter the latest launched Claude, Codex, or OpenCode session")
   .argument("[task]")
-  .option("--to <agent>", "target agent; claude and codex are supported")
+  .option("--to <agent>", "target agent; claude, codex, and opencode are supported")
   .addOption(new Option("--launch-mode <mode>", "auto, inline, or terminal").choices(LAUNCH_MODES).default("auto"))
   .option("--json", "print machine-readable JSON")
   .action(async (task: string | undefined, options: { to?: string; launchMode: LaunchMode; json?: boolean }) => {
@@ -419,17 +419,20 @@ program.command("enter")
     if (!supportsNativeEnter(target)) {
       throw new Error(`Native session re-entry is not implemented for ${target}`);
     }
-    const spec = resumeLaunchSpec(target, receipt.repositoryRoot, receipt.sessionId);
+    const sessionId = target === "opencode"
+      ? resolveOpenCodeResumeSessionId(receipt.repositoryRoot, receipt.sessionId, receipt.sessionName)
+      : receipt.sessionId;
+    const spec = resumeLaunchSpec(target, receipt.repositoryRoot, sessionId);
     if (!commandExists(spec.command)) throw new Error(`${spec.command} is not installed`);
     const launchMode = resolveLaunchMode(options.launchMode);
     const result = {
       taskId: receipt.taskId,
       target,
-      sessionId: receipt.sessionId,
+      sessionId,
       sessionName: receipt.sessionName,
       launchMode
     };
-    if (!options.json) console.log(`Re-entering ${receipt.sessionName ?? receipt.sessionId} (${receipt.sessionId}) in ${launchMode} mode.`);
+    if (!options.json) console.log(`Re-entering ${receipt.sessionName ?? sessionId} (${sessionId}) in ${launchMode} mode.`);
     if (launchMode === "terminal") {
       spawnInVisibleTerminal(spec.command, spec.args, spec.cwd);
       if (options.json) console.log(JSON.stringify(result, null, 2));
