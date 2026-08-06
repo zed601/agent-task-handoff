@@ -38,7 +38,13 @@ describe("CLI integration", () => {
     };
     expect(checkpoint).toMatchObject({ taskId: "login", revision: 1 });
     expect(handoff(root, "verify", "login")).toContain("FRESH");
-    expect(JSON.parse(handoff(root, "doctor", "--json"))).toMatchObject({
+    const doctor = spawnSync(process.execPath, [cli, "doctor", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" }
+    });
+    expect([0, 2]).toContain(doctor.status);
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
       initialized: true,
       latestTask: "login",
       nextSteps: expect.arrayContaining([expect.stringContaining("handoff go")]),
@@ -318,6 +324,83 @@ describe("CLI integration", () => {
     });
     expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual([
       "resume", "handoff-login"
+    ]);
+  });
+
+  it("launches and re-enters an OpenCode session via --continue", () => {
+    const root = mkdtempSync(join(tmpdir(), "handoff-cli-"));
+    const bin = mkdtempSync(join(tmpdir(), "handoff-bin-"));
+    const argsPath = join(root, "opencode-args.json");
+    const fakeOpenCode = join(bin, "opencode");
+    initializeGitRepository(root);
+    handoff(root, "init");
+    handoff(root, "checkpoint", "--yes", "--task", "login", "--goal", "Fix login", "--next", "Run tests");
+    writeFileSync(
+      fakeOpenCode,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "session" && args[1] === "list") {
+  process.stdout.write(JSON.stringify([{
+    id: "ses_from_list",
+    directory: process.cwd(),
+    title: "handoff-login",
+    updated: Date.now()
+  }]));
+  process.exit(0);
+}
+fs.writeFileSync(process.env.HANDOFF_TEST_ARGS, JSON.stringify(args));
+`,
+      "utf8"
+    );
+    chmodSync(fakeOpenCode, 0o755);
+    const env = {
+      ...process.env,
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      HANDOFF_TEST_ARGS: argsPath,
+      NO_COLOR: "1"
+    };
+
+    const transfer = JSON.parse(execFileSync(process.execPath, [
+      cli,
+      "go", "login",
+      "--to", "opencode",
+      "--name", "handoff-login",
+      "--exec",
+      "--launch-mode", "inline",
+      "--no-copy",
+      "--json"
+    ], { cwd: root, encoding: "utf8", env })) as {
+      launched: boolean;
+      resumeCommand: string;
+      targetSessionId: string;
+      targetSessionName: string;
+    };
+
+    expect(transfer).toMatchObject({
+      launched: true,
+      targetSessionId: "__last__",
+      targetSessionName: "handoff-login",
+      resumeCommand: "opencode --continue"
+    });
+    const launchedArgs = JSON.parse(readFileSync(argsPath, "utf8")) as string[];
+    expect(launchedArgs.at(-2)).toBe("--prompt");
+    expect(launchedArgs.at(-1)).toContain("Task handoff for opencode");
+
+    const entered = JSON.parse(execFileSync(process.execPath, [
+      cli,
+      "enter", "login",
+      "--to", "opencode",
+      "--launch-mode", "inline",
+      "--json"
+    ], { cwd: root, encoding: "utf8", env })) as { sessionId: string; sessionName: string };
+    expect(entered).toMatchObject({
+      sessionId: "ses_from_list",
+      sessionName: "handoff-login"
+    });
+    expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual([
+      root,
+      "--session", "ses_from_list"
     ]);
   });
 });

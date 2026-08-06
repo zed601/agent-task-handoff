@@ -71,6 +71,8 @@ export const sessionSummaryJsonSchema = {
   ]
 } as const;
 
+const MAX_SESSION_CANDIDATES = 80;
+
 function walk(root: string, files: string[] = []): string[] {
   if (!existsSync(root)) return files;
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -79,6 +81,54 @@ function walk(root: string, files: string[] = []): string[] {
     else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
   }
   return files;
+}
+
+function clip(text: string, max = 280): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function uniqueStrings(values: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function firstSentence(text: string, max = 280): string {
+  const match = text.match(/[^.!?\n]{8,}[.!?]?/);
+  return clip(match?.[0] ?? text, max);
+}
+
+function sentences(text: string): string[] {
+  return text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((part) => part.replace(/^[\s*-]+/, "").trim())
+    .filter((part) => part.length >= 8);
+}
+
+function collectMatchingSentences(texts: string[], pattern: RegExp, limit: number): string[] {
+  const hits: string[] = [];
+  for (const text of texts) {
+    for (const sentence of sentences(text)) {
+      if (pattern.test(sentence)) hits.push(clip(sentence));
+      pattern.lastIndex = 0;
+    }
+  }
+  return uniqueStrings(hits, limit);
+}
+
+function isAckMessage(text: string): boolean {
+  return /^(?:ok(?:ay)?|yes|yep|sure|continue|thanks|thx|got it|继续|好的|行|嗯+|收到)[.!]?$/i.test(text.trim());
 }
 
 function parseLines(path: string): unknown[] {
@@ -290,6 +340,45 @@ function loadOpenCodeCandidate(repositoryRoot: string, selector: string): Sessio
   return parseOpenCodeExport(exported.stdout, `opencode:${selected.id}`);
 }
 
+/**
+ * Prefer an explicit OpenCode session id for resume. When the launch receipt
+ * only recorded `__last__`, resolve the newest session for this repository.
+ */
+export function resolveOpenCodeResumeSessionId(
+  repositoryRoot: string,
+  sessionId: string,
+  sessionName?: string
+): string {
+  if (sessionId !== "__last__") return sessionId;
+  if (!commandExists("opencode")) return sessionId;
+  const listed = runCommand("opencode", ["session", "list", "--format", "json"], {
+    cwd: repositoryRoot,
+    allowFailure: true
+  });
+  if (listed.exitCode !== 0) return sessionId;
+  try {
+    const parsed = JSON.parse(listed.stdout) as unknown;
+    if (!Array.isArray(parsed)) return sessionId;
+    const sessions = parsed.filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object"
+    );
+    sessions.sort((left, right) => Number(right.updated ?? 0) - Number(left.updated ?? 0));
+    const inRepo = sessions.filter((session) =>
+      typeof session.directory === "string" && resolve(session.directory) === resolve(repositoryRoot)
+    );
+    if (sessionName) {
+      const byTitle = inRepo.find((session) =>
+        typeof session.title === "string" && session.title === sessionName
+      );
+      if (typeof byTitle?.id === "string") return byTitle.id;
+    }
+    const latest = inRepo[0];
+    return typeof latest?.id === "string" ? latest.id : sessionId;
+  } catch {
+    return sessionId;
+  }
+}
+
 export function loadSessionCandidate(
   agent: SessionAgent,
   repositoryRoot: string,
@@ -298,7 +387,8 @@ export function loadSessionCandidate(
   if (agent === "opencode") return loadOpenCodeCandidate(repositoryRoot, selector);
   const candidates = candidateFiles(agent)
     .map((path) => ({ path, mtime: statSync(path).mtimeMs }))
-    .sort((left, right) => right.mtime - left.mtime);
+    .sort((left, right) => right.mtime - left.mtime)
+    .slice(0, MAX_SESSION_CANDIDATES);
   for (const file of candidates) {
     const candidate = parseSessionFile(agent, file.path);
     const cwdMatches = candidate.cwd && resolve(candidate.cwd) === resolve(repositoryRoot);
@@ -312,23 +402,81 @@ export function draftFromSession(candidate: SessionCandidate, maxMessages = 80):
   const messages = candidate.messages.slice(-maxMessages);
   const userMessages = messages.filter((message) => message.role === "user");
   const assistantMessages = messages.filter((message) => message.role === "assistant");
-  const goal = [...userMessages].reverse().find((message) => message.text.length >= 20)?.text
-    ?? userMessages.at(-1)?.text
-    ?? "Continue the unfinished task from the selected session";
-  const completed = assistantMessages
-    .filter((message) => /(?:completed|implemented|fixed|通过|完成|已实现|已修复)/i.test(message.text))
-    .slice(-3)
-    .map((message) => message.text.slice(0, 500));
+  const userTexts = userMessages.map((message) => message.text);
+  const assistantTexts = assistantMessages.map((message) => message.text);
+
+  const goalSource = userMessages.find((message) => message.text.trim().length >= 20 && !isAckMessage(message.text))
+    ?? [...userMessages].reverse().find((message) => message.text.trim().length >= 12)
+    ?? userMessages.at(-1);
+  const goal = clip(goalSource?.text ?? "Continue the unfinished task from the selected session", 2_000);
+
+  const completed = collectMatchingSentences(
+    assistantTexts,
+    /\b(?:completed|implemented|fixed|added|updated|created|resolved|located|verified|通过|完成|已实现|已修复|已添加|已更新)\b/i,
+    5
+  );
+  if (completed.length === 0 && assistantMessages.length > 0) {
+    completed.push(firstSentence(assistantMessages.at(-1)!.text));
+  }
+  if (candidate.commands.length > 0) {
+    completed.push(`Observed commands: ${uniqueStrings(candidate.commands.slice(-5), 5).join("; ")}`);
+  }
+
+  const attempts = collectMatchingSentences(
+    [...assistantTexts, ...userTexts],
+    /\b(?:failed|didn't work|did not work|does not work|rejected|broke|regressed|regression|报错|失败|不行)\b/i,
+    4
+  ).map((approach) => ({
+    approach,
+    reason: "Extracted from visible session text; re-verify before retrying."
+  }));
+
+  const blockers = collectMatchingSentences(
+    [...userTexts, ...assistantTexts],
+    /\b(?:blocked(?:\s+by|\s+on)?|blocker|waiting\s+(?:on|for)|cannot|can't|need(?:s)?\s+(?:access|credentials?|permission)|阻塞|卡住|缺少)\b/i,
+    4
+  );
+
+  const decisions = collectMatchingSentences(
+    [...userTexts, ...assistantTexts],
+    /\b(?:decided(?:\s+to)?|we'll\s+use|we\s+should|prefer(?:ring)?|chose\s+to|决定|采用|选择)\b/i,
+    4
+  );
+
+  const pending = collectMatchingSentences(
+    [...userTexts, ...assistantTexts],
+    /\b(?:(?:still\s+)?need(?:s)?\s+to|TODO|remaining|pending|next(?:\s+step)?(?:\s+is|:)|需要继续|待办|下一步)\b/i,
+    5
+  );
+
+  const acceptance = collectMatchingSentences(
+    userTexts,
+    /\b(?:acceptance|must|should\s+ensure|验收|必须|需要保证)\b/i,
+    4
+  );
+
+  const lastUser = userMessages.at(-1);
+  const nextFromPending = pending[0];
+  const nextFromAssistant = [...assistantMessages].reverse().find((message) =>
+    /next(?:\s+step)?|continue(?:\s+by|\s+with)?|should\s+(?:now|next)|接下来|下一步/i.test(message.text)
+  );
+  const nextAction = nextFromPending
+    ?? (lastUser && !isAckMessage(lastUser.text) && lastUser.text.trim().length >= 12
+      ? firstSentence(lastUser.text)
+      : undefined)
+    ?? (nextFromAssistant ? firstSentence(nextFromAssistant.text) : undefined)
+    ?? "Verify the recorded repository state and continue the unfinished task.";
+
   return {
-    goal: goal.slice(0, 2_000),
-    acceptance: [],
-    completed,
-    pending: [],
-    decisions: [],
-    attempts: [],
-    blockers: [],
-    nextAction: "Verify the recorded repository state and continue the unfinished task.",
-    contextPaths: candidate.files.slice(0, 30)
+    goal,
+    acceptance,
+    completed: uniqueStrings(completed, 6),
+    pending,
+    decisions,
+    attempts,
+    blockers,
+    nextAction: clip(nextAction, 500),
+    contextPaths: uniqueStrings(candidate.files, 30)
   };
 }
 
@@ -364,8 +512,10 @@ function findDraft(value: unknown): SessionDraft | undefined {
 }
 
 export function summarizeSession(candidate: SessionCandidate): SessionDraft {
+  // OpenCode has no structured-output schema flag comparable to Claude/Codex.
+  // Prefer the local heuristic draft over refusing --summarize entirely.
   if (candidate.agent === "opencode") {
-    throw new Error("Structured --summarize currently supports Claude and Codex sessions only");
+    return draftFromSession(candidate);
   }
   if (!commandExists(candidate.agent)) {
     throw new Error(`${candidate.agent} CLI is not installed`);

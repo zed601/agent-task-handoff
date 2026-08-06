@@ -6,7 +6,7 @@
 | Save and hand off | `handoff go --goal "..."` |
 | Check whether an old handoff is still valid | `handoff verify` |
 | Continue latest checkpoint in another agent | `handoff go` |
-| Re-enter a launched Claude/Codex session | `handoff enter` |
+| Re-enter a launched Claude/Codex/OpenCode session | `handoff enter` |
 | Preview a recovery prompt | `handoff resume` |
 | Hand the task to a person | `handoff go --to human` |
 | Produce a shareable document | `handoff export --format markdown` |
