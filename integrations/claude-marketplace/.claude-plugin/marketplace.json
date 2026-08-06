@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "taskhandoff-local",
+  "version": "0.8.0",
+  "description": "Local development marketplace for TaskHandoff",
+  "owner": {
+    "name": "TaskHandoff contributors"
+  },
+  "plugins": [
+    {
+      "name": "taskhandoff",
+      "description": "Save and transfer unfinished coding tasks across sessions, agents, and humans",
+      "version": "0.8.0",
+      "author": {
+        "name": "TaskHandoff contributors"
+      },
+      "source": "./plugins/taskhandoff",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "name": "agent-task-handoff",
+  "version": "0.8.0",
+  "description": "Pass unfinished coding tasks between Claude, Codex, Cursor, Copilot, and humans — without dumping the whole chat",
+  "type": "module",
+  "bin": {
+    "handoff": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "docs/handoff.schema.json",
+    "docs/assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint .",
+    "prepublishOnly": "npm run build",
+    "schema": "pnpm build && node scripts/generate-schema.mjs",
+    "sync:integrations": "node scripts/sync-integrations.mjs",
+    "test": "pnpm build && vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.8.0",
+    "clipboardy": "^4.0.0",
+    "commander": "^14.0.0",
+    "yaml": "^2.8.1",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.34.0",
+    "tsx": "^4.20.5",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "handoff",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "cursor",
+    "copilot",
+    "opencode",
+    "git",
+    "cli"
+  ],
+  "license": "MIT"
+}

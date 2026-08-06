@@ -1,0 +1,8 @@
+{
+  "name": "taskhandoff",
+  "description": "Save and transfer unfinished coding tasks across sessions, agents, and humans",
+  "version": "0.8.0",
+  "author": {
+    "name": "TaskHandoff contributors"
+  }
+}

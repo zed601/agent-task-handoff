@@ -1,0 +1,6 @@
+{"type":"session_meta","timestamp":"2026-01-01T00:00:00Z","payload":{"id":"codex-session","cwd":"/repo"}}
+{"type":"response_item","timestamp":"2026-01-01T00:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the duplicate webhook handler in src/webhook.ts"}]}}
+{"type":"response_item","timestamp":"2026-01-01T00:00:02Z","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pnpm test\"}"}}
+{"type":"response_item","timestamp":"2026-01-01T00:00:03Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Located the failing handler."}]}}
+{"type":"unknown_future_record","payload":{"ignored":true}}
+not-valid-json

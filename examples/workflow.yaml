@@ -1,0 +1,12 @@
+steps:
+  - id: implement
+    role: implementer
+    instruction: Implement the accepted task without discarding existing user changes.
+    acceptance:
+      - The requested behavior is covered by tests.
+  - id: verify
+    role: reviewer
+    instruction: Reproduce the result, inspect the diff, and verify the acceptance criteria.
+    acceptance:
+      - Relevant tests pass.
+      - No rejected approach was silently reintroduced.

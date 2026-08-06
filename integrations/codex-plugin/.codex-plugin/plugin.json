@@ -1,0 +1,32 @@
+{
+  "name": "taskhandoff",
+  "version": "0.8.0",
+  "description": "Save and transfer unfinished coding tasks across sessions, agents, and humans",
+  "author": {
+    "name": "TaskHandoff contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "handoff",
+    "coding",
+    "checkpoint"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TaskHandoff",
+    "shortDescription": "Resume unfinished tasks across coding agents.",
+    "longDescription": "Create verifiable task checkpoints, detect stale repository evidence, resume work in Claude, Codex, OpenCode, GitHub Copilot CLI, or Cursor, and export human-readable handoffs.",
+    "developerName": "TaskHandoff contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Save my current coding task so I can continue in a new session.",
+      "Hand this unfinished task to another coding agent.",
+      "Create a human-readable handoff for my teammate."
+    ]
+  }
+}

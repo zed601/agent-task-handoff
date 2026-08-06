@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Handoff"
+  short_description: "Save and transfer tasks across coding agents"
+  default_prompt: "Use $handoff-task to save or transfer my current coding task."

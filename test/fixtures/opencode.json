@@ -1,0 +1,30 @@
+{
+  "info": {
+    "id": "opencode-session",
+    "directory": "/repo",
+    "title": "Fix webhook"
+  },
+  "messages": [
+    {
+      "info": { "role": "user" },
+      "parts": [
+        { "type": "text", "text": "Fix the unfinished handler in src/webhook.ts" }
+      ]
+    },
+    {
+      "info": { "role": "assistant" },
+      "parts": [
+        { "type": "text", "text": "Implemented the first validation step." },
+        {
+          "type": "tool",
+          "state": {
+            "status": "completed",
+            "input": { "command": "pnpm test", "filePath": "src/webhook.ts" },
+            "output": "passed"
+          }
+        },
+        { "type": "reasoning", "text": "This hidden reasoning must be ignored." }
+      ]
+    }
+  ]
+}
