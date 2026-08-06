@@ -30,7 +30,7 @@ const PROMPT_LIMITS = {
   text: 400
 } as const;
 
-function clipText(value: string, max = PROMPT_LIMITS.text): string {
+function clipText(value: string, max: number = PROMPT_LIMITS.text): string {
   const cleaned = value.replace(/\s+/g, " ").trim();
   if (cleaned.length <= max) return cleaned;
   return `${cleaned.slice(0, Math.max(0, max - 1))}…`;

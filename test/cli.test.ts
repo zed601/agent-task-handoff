@@ -398,10 +398,9 @@ fs.writeFileSync(process.env.HANDOFF_TEST_ARGS, JSON.stringify(args));
       sessionId: "ses_from_list",
       sessionName: "handoff-login"
     });
-    expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual([
-      root,
-      "--session", "ses_from_list"
-    ]);
+    const enterArgs = JSON.parse(readFileSync(argsPath, "utf8")) as string[];
+    expect(enterArgs.slice(-2)).toEqual(["--session", "ses_from_list"]);
+    expect(enterArgs[0]).toMatch(/handoff-cli-/);
   });
 
   it("records launch receipts and weakly re-enters Cursor", () => {
