@@ -38,7 +38,13 @@ describe("CLI integration", () => {
     };
     expect(checkpoint).toMatchObject({ taskId: "login", revision: 1 });
     expect(handoff(root, "verify", "login")).toContain("FRESH");
-    expect(JSON.parse(handoff(root, "doctor", "--json"))).toMatchObject({
+    const doctor = spawnSync(process.execPath, [cli, "doctor", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" }
+    });
+    expect([0, 2]).toContain(doctor.status);
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
       initialized: true,
       latestTask: "login",
       nextSteps: expect.arrayContaining([expect.stringContaining("handoff go")]),

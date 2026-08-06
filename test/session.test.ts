@@ -18,7 +18,10 @@ describe("session adapters", () => {
     expect(candidate.messages).toHaveLength(2);
     expect(candidate.commands).toEqual(["pnpm test"]);
     expect(candidate.messages.some((message) => message.text.includes("sidechain"))).toBe(false);
-    expect(draftFromSession(candidate).completed).toHaveLength(1);
+    const draft = draftFromSession(candidate);
+    expect(draft.completed.some((item) => /completed the database constraint/i.test(item))).toBe(true);
+    expect(draft.completed.some((item) => /pnpm test/i.test(item))).toBe(true);
+    expect(draft.nextAction.toLowerCase()).toContain("idempotency");
   });
 
   it("parses an OpenCode export without reasoning or tool output", () => {
@@ -29,6 +32,36 @@ describe("session adapters", () => {
     expect(candidate.commands).toEqual(["pnpm test"]);
     expect(candidate.files).toContain("src/webhook.ts");
     expect(candidate.messages.some((message) => message.text.includes("hidden reasoning"))).toBe(false);
+  });
+
+  it("extracts decisions, attempts, blockers, and pending from visible session text", () => {
+    const draft = draftFromSession({
+      agent: "claude",
+      path: "fixture",
+      messages: [
+        {
+          role: "user",
+          text: "Fix webhook retries. Acceptance: must be idempotent under duplicate delivery. We decided to use a ledger table."
+        },
+        {
+          role: "assistant",
+          text: "I implemented the unique constraint. The in-memory cache approach failed under concurrency. Blocked on missing staging credentials. Next step is wire the outbox publisher."
+        },
+        { role: "user", text: "ok" }
+      ],
+      commands: ["pnpm test src/webhook.test.ts"],
+      files: ["src/webhook.ts", "src/ledger.ts"]
+    });
+
+    expect(draft.goal).toMatch(/Fix webhook retries/i);
+    expect(draft.acceptance.some((item) => /idempotent/i.test(item))).toBe(true);
+    expect(draft.decisions.some((item) => /ledger table/i.test(item))).toBe(true);
+    expect(draft.attempts.some((item) => /in-memory cache/i.test(item.approach))).toBe(true);
+    expect(draft.blockers.some((item) => /staging credentials/i.test(item))).toBe(true);
+    expect(draft.pending.some((item) => /outbox publisher/i.test(item))).toBe(true);
+    expect(draft.nextAction).toMatch(/outbox publisher/i);
+    expect(draft.contextPaths).toEqual(["src/webhook.ts", "src/ledger.ts"]);
+    expect(draft.completed.some((item) => /unique constraint/i.test(item))).toBe(true);
   });
 
   it("passes a strict JSON schema to an optional summarizer", () => {
